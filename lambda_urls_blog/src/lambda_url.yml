@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: "Serverless Lambda function deployment with functions URL"
+
+Parameters:
+  TrustedOrg:
+    Default: ""
+    Type: String
+    Description: Organization Id to allow in Lambda Auth IAM policy
+Resources:
+  UrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/url_function
+      Handler: url_function.lambda_handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          MAX_DEPTH: 2
+      Policies:
+        - AWSOrganizationsReadOnlyAccess
+      FunctionUrlConfig:
+        AuthType: AWS_IAM # authentication through AWS IAM
+        # Cors:
+        #     AllowOrigins:
+        #         - "https://example.com"
+
+  PermissionForURLInvoke:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref UrlFunction
+      FunctionUrlAuthType: AWS_IAM
+      Action: lambda:InvokeFunctionUrl
+      PrincipalOrgID: !Ref TrustedOrg
+      Principal: "*"
+
+  # # will result in following policy:
+# {
+#   "Version": "2012-10-17",
+#   "Id": "default",
+#   "Statement": [
+#     {
+#       "Sid": "<RANDOM_SID>",
+#       "Effect": "Allow",
+#       "Principal": "*",
+#       "Action": "lambda:InvokeFunctionUrl",
+#       "Resource": "arn:aws:lambda:eu-central-1:<accountId>:function:<FunctionName>",
+#       "Condition": {
+#         "StringEquals": {
+#           "lambda:FunctionUrlAuthType": "AWS_IAM",
+#           "aws:PrincipalOrgID": "<ORGID>"
+#         }
+#       }
+#     }
+#   ]
+# }
+
+Outputs:
+  UrlFunctionEndpoint:
+      Description: "Lambda Function URL Endpoint"
+      Value: !GetAtt UrlFunctionUrl.FunctionUrl
