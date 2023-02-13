@@ -26,6 +26,61 @@ Conditions:
     - Ref: DeliveryStreamName
     - ''
 Resources:
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId:
+        Ref: AWS::AccountId
+      DatabaseInput:
+        Description: for athena
+        Name: observability
+  GlueTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId:
+        Ref: AWS::AccountId
+      DatabaseName:
+        Ref: GlueDatabase
+      TableInput:
+        Description: CF-Logs
+        Name: cflogs_table
+        Owner: observability
+        StorageDescriptor:
+          Columns:
+          - Name: version
+            Type: string
+          - Name: id
+            Type: string
+          - Name: detail-type
+            Type: string
+          - Name: source
+            Type: string
+          - Name: account
+            Type: string
+          - Name: time
+            Type: string
+          - Name: region
+            Type: string
+          - Name: resources
+            Type: array<string>
+          - Name: detail
+            Type: struct<stack-id:string,status-details:struct<status:string,status-reason:string>>
+          - Name: stackname
+            Type: string
+          - Name: stackstatus
+            Type: string
+          Compressed: false
+          Location:
+            Fn::Join:
+            - ''
+            - - s3://
+              - Ref: S3Bucket
+              - /2023
+          InputFormat: org.apache.hadoop.mapred.TextInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.openx.data.jsonserde.JsonSerDe
+        TableType: EXTERNAL_TABLE
   EventBridgeRule:
     Type: AWS::Events::Rule
     Properties:
