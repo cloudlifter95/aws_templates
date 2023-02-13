@@ -42,27 +42,27 @@ Resources:
   #     Name: !Ref EventSourceName # to randomize later
 
   StoredQuery:
-  Type: AWS::Config::StoredQuery
-  Properties: 
-    QueryDescription: Query to get select most recent rows from a table
-    QueryExpression: |
-      Select
-          a.time, a.stackname, a.stackstatus
-      from
-          observability.cflogs_table a
-          inner join (
-              select
-                  stackname,
-                  max(time) as maxtime
-              from
-                  observability.cflogs_table
-              group by
-                  stackname
-          ) b on a.stackname = b.stackname
-          and a.time = b.maxtime;
-    QueryName: cf-stacks-status
-    # Tags: 
-    #   - Tag
+    Type: AWS::Config::StoredQuery
+    Properties: 
+      QueryDescription: Query to get select most recent rows from a table
+      QueryExpression: |
+        Select
+            a.time, a.stackname, a.stackstatus
+        from
+            observability.cflogs_table a
+            inner join (
+                select
+                    stackname,
+                    max(time) as maxtime
+                from
+                    observability.cflogs_table
+                group by
+                    stackname
+            ) b on a.stackname = b.stackname
+            and a.time = b.maxtime;
+      QueryName: cf-stacks-status
+      # Tags: 
+      #   - Tag
 
   GlueDatabase:
     Type: AWS::Glue::Database
