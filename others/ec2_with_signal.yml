@@ -118,7 +118,7 @@ Resources:
       # SubnetId: !Ref SubnetId
       IamInstanceProfile: !Ref EC2InstanceProfile
       NetworkInterfaces: 
-      - AssociatePublicIpAddress: "true"
+      - AssociatePublicIpAddress: "true" # internet access required for ssm
         DeviceIndex: "0"
         GroupSet: 
           - !Ref SecurityGroup
