@@ -1,0 +1,5 @@
+InstanceName: "MoInstance"
+InstanceType: "t3.medium"
+ImageId: "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"
+VpcId: "vpc-0c3fedae5f80fda92"
+SubnetId: "subnet-0d45ed93536ad7ff0"
