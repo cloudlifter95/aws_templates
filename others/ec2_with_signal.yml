@@ -3,7 +3,6 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Create a variable number of EC2 instance resources.
 
 Parameters:
-
   InstanceName:
     Description: Name of EC2 instance
     Type: String
@@ -71,8 +70,8 @@ Parameters:
     ConstraintDescription: must be a valid EC2 instance type.
 
   ImageId:
-    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    Default: "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"
 
   VpcId:
     Description: VpcId of your existing Virtual Private Cloud (VPC)
@@ -110,19 +109,85 @@ Resources:
     #   ResourceSignal:
     #     Timeout: PT240M
     Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT240M
     Metadata:
-      AWS::CloudFormation::Init: {}
+      AWS::CloudFormation::Init:
+        configSets:
+          init_setup: [install_cfn, echo_command, signal_success]
+
+        install_cfn:
+          files:
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+                interval=5
+              mode: "000400"
+              owner: root
+              group: root
+
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.EC2Instance.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --configsets update --region ${AWS::Region}
+                runas=root
+              mode: "000400"
+              owner: root
+              group: root
+        echo_command:
+          commands:
+            10_echo:
+              command: echo "run ok"
+
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: "true"
+                ensureRunning: "true"
+                files:
+                  [
+                    /etc/cfn/cfn-hup.conf,
+                    /etc/cfn/hooks.d/cfn-auto-reloader.conf,
+                  ]
+
+        signal_success:
+          files:
+            /tmp/signal_success.bash:
+              mode: "000700"
+              owner: root
+              group: root
+              context:
+                stackid: !Ref AWS::StackId
+                region: !Ref AWS::Region
+              content: |
+                #!/bin/bash -xe
+                echo ""
+                echo "signal success to the stack"
+                sudo /opt/aws/bin/cfn-signal -s true --stack {{stackid}} --resource EC2Instance --region {{region}}
+          commands:
+            10_signal_success_test:
+              command:
+                echo "signal_success"
+            20_signal_success:
+              command:
+                sudo /bin/bash /tmp/signal_success.bash
+
     Properties:
       ImageId: !Ref ImageId
       InstanceType: !Ref InstanceType
       # SubnetId: !Ref SubnetId
       IamInstanceProfile: !Ref EC2InstanceProfile
-      NetworkInterfaces: 
-      - AssociatePublicIpAddress: "true" # internet access required for ssm
-        DeviceIndex: "0"
-        GroupSet: 
-          - !Ref SecurityGroup
-        SubnetId: !Ref SubnetId
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: "true" # internet access required for ssm
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref SecurityGroup
+          SubnetId: !Ref SubnetId
       # SecurityGroupIds:
       #   - !Ref SecurityGroup
       # KeyName: !Ref KeyName
@@ -137,9 +202,23 @@ Resources:
           #!/bin/bash -xe
           echo "entering userdata"
           sudo yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
-          sudo start amazon-ssm-agent
-          sudo systemctl enable amazon-ssm-agent
+          # sudo systemctl enable amazon-ssm-agent
           sudo systemctl status amazon-ssm-agent
+
+          ### not needed. just for reference
+          #sudo yum install -y aws-cfn-bootstrap
+          #sudo systemctl restart cfn-hup
+
+          yum update -y aws-cfn-bootstrap
+          # Start cfn-init
+          echo "userdata script: start cfn-init. log files: /var/log/cloud-init.log , /var/log/cloud-init-output.log, /var/log/cfn-init-cmd.log , /var/log/cfn-init.log "
+          /opt/aws/bin/cfn-init -v -s ${AWS::StackId} -r EC2Instance --region ${AWS::Region} --configsets init_setup || error_exit 'Failed to run cfn-init'
+
+          ##### done within config set run by cfn-init, but could be done from userdata like following:
+          # Start up the cfn-hup daemon to listen for changes to the EC2 instance metadata
+          # /opt/aws/bin/cfn-hup || error_exit 'Failed to start cfn-hup'
+          # All done so signal success
+          # /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackId} --resource WebServerHost --region ${AWS::Region}
 
           # /usr/local/bin/cfn-signal -s true --stack ${AWS::StackId} --resource EC2Instance --region ${AWS::Region}
 
