@@ -1,5 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
-
+Transform:
+  - AWS::Serverless-2016-10-31
+  
 Description: Create a variable number of EC2 instance resources.
 
 Parameters:
@@ -212,7 +214,7 @@ Resources:
           yum update -y aws-cfn-bootstrap
           # Start cfn-init
           echo "userdata script: start cfn-init. log files: /var/log/cloud-init.log , /var/log/cloud-init-output.log, /var/log/cfn-init-cmd.log , /var/log/cfn-init.log "
-          /opt/aws/bin/cfn-init -v -s ${AWS::StackId} -r EC2Instance --region ${AWS::Region} --configsets init_setup || error_exit 'Failed to run cfn-init'
+          # /opt/aws/bin/cfn-init -v -s ${AWS::StackId} -r EC2Instance --region ${AWS::Region} --configsets init_setup || error_exit 'Failed to run cfn-init'
 
           ##### done within config set run by cfn-init, but could be done from userdata like following:
           # Start up the cfn-hup daemon to listen for changes to the EC2 instance metadata
@@ -248,6 +250,51 @@ Resources:
       #   FromPort: "22"
       #   ToPort: "22"
       #   CidrIp: !Ref SSHLocation
+
+  # EC2InstanceSignaler:
+  #   Type: AWS::CloudFormation::CustomResource
+  #   Properties:
+  #     ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:X
+  #     # EC2InstanceHostName : !Ref EC2InstanceHostName
+
+  CFSignalerFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: Allow
+            Principal: 
+              Service: 
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess # to tighten
+        - arn:aws:iam::aws:policy/AdministratorAccess # to remove
+      # Policies:
+      #   - PolicyName: "AllowSSMAutomation"
+      #     PolicyDocument:
+      #       Version: "2012-10-17"
+      #       Statement:
+      #         - Effect: "Allow"
+      #           Action: "ssm:SendCommand" 
+      #           Resource: "*"
+      #         - Effect: "Allow"
+      #           Action: "ssm:ListCommands" 
+      #           Resource: "*"
+
+  CFSignalerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CFSignalerFunction
+      Role: !GetAtt CFSignalerFunctionRole.Arn
+      CodeUri: ./functions/CFSignalerFunction
+      Handler: app.lambda_handler
+      Runtime: python3.10
+      Timeout: 240
+      # Layers:
+      #   - !Ref Layer
 
 Outputs:
   InstanceId:

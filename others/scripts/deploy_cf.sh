@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+set -e
 # set -o errexit
 set -o pipefail
 # set -o nounset
@@ -37,6 +38,9 @@ while [[ $# -gt 0 ]]; do
         param_file=*)
             param_file="${1#*=}"
             ;;
+        bucket_name=*)
+            bucket_name="${1#*=}"
+            ;;
         -h|--help)
             echo "Usage: $0 [options]"
             echo "Options:"
@@ -46,6 +50,7 @@ while [[ $# -gt 0 ]]; do
             echo "  uuid=<uuid>                         (Optional) UUID to append to stack name"
             echo "  profile=<profile>                   (Optional) AWS CLI profile to use"
             echo "  param_file=<param_file>             (Optional) Path to parameter file in YAML format"
+            echo "  bucket_name=<bucket_name>           (Optional) Bucket to use for packaging if referenced"
             exit 0
             ;;
         *)
@@ -142,7 +147,24 @@ echo "  Account: $(get_aws_account_id)"
 echo "  Profile: $profile"
 echo "  Parameter file: $param_file"
 echo "  Extracted Parameters: $stack_params"
+echo "  Bucket name: $bucket_name"
 echo ""
+
+if [ -n "$bucket_name" ]; then
+    echo "Bucket referenced. Template will be packaged"
+    echo "Packaging $template_file"
+    aws cloudformation package \
+        --template-file $template_file \
+        --output-template-file "$template_file.packaged" \
+        --s3-bucket ${bucket_name} \
+        --s3-prefix ${stack_name} \
+        --profile $profile \
+
+    echo "Rewriting deploy command"
+    # Perform find and replace within deploy_command
+    deploy_command="${deploy_command//\"$template_file\"/\"$template_file.packaged\"}"
+
+fi
 
 echo $deploy_command
 eval "$deploy_command"
