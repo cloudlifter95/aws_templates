@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform:
   - AWS::Serverless-2016-10-31
-  
+
 Description: Create a variable number of EC2 instance resources.
 
 Parameters:
@@ -83,6 +83,28 @@ Parameters:
     Description: SubnetId of an existing subnet in your Virtual Private Cloud (VPC)
     Type: String
 
+  RuleState:
+    Type: String
+    AllowedValues:
+      - Enabled
+      - Disabled
+    Default: Enabled
+    Description: "A parameter that can only have the value 'Enabled', 'Disabled'"
+
+  Threshold:
+    Type: Number
+    Description: "An integer parameter representing the threshold number of retries"
+    MinValue: 1
+    MaxValue: 10
+    Default: 2
+  
+  WaitInMinutes:
+    Type: Number
+    Description: "An integer parameter representing the threshold number of retries"
+    MinValue: 5
+    MaxValue: 15
+    Default: 10
+
 Mappings: {}
 
 Resources:
@@ -107,6 +129,7 @@ Resources:
       Roles:
         - !Ref EC2SSMRole
   EC2Instance:
+    DependsOn: CFSignalerCustom
     # CreationPolicy:
     #   ResourceSignal:
     #     Timeout: PT240M
@@ -173,11 +196,9 @@ Resources:
                 sudo /opt/aws/bin/cfn-signal -s true --stack {{stackid}} --resource EC2Instance --region {{region}}
           commands:
             10_signal_success_test:
-              command:
-                echo "signal_success"
+              command: echo "signal_success"
             20_signal_success:
-              command:
-                sudo /bin/bash /tmp/signal_success.bash
+              command: sudo /bin/bash /tmp/signal_success.bash
 
     Properties:
       ImageId: !Ref ImageId
@@ -251,24 +272,25 @@ Resources:
       #   ToPort: "22"
       #   CidrIp: !Ref SSHLocation
 
-  # EC2InstanceSignaler:
-  #   Type: AWS::CloudFormation::CustomResource
-  #   Properties:
-  #     ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:X
-  #     # EC2InstanceHostName : !Ref EC2InstanceHostName
+  CFSingalerCustomResource:
+    Type: 'Custom::MyCustomResource'
+    Properties:
+      ServiceToken: !GetAtt CFSignalerFunctionRole.Arn
+      ParameterValue: !Ref Threshold
+      Counter: !Ref SchedulerSSMParameter
 
   CFSignalerFunctionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
-        Statement: 
+        Statement:
           - Effect: Allow
-            Principal: 
-              Service: 
+            Principal:
+              Service:
                 - lambda.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns: 
+      ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess # to tighten
         - arn:aws:iam::aws:policy/AdministratorAccess # to remove
@@ -278,13 +300,14 @@ Resources:
       #       Version: "2012-10-17"
       #       Statement:
       #         - Effect: "Allow"
-      #           Action: "ssm:SendCommand" 
+      #           Action: "ssm:SendCommand"
       #           Resource: "*"
       #         - Effect: "Allow"
-      #           Action: "ssm:ListCommands" 
+      #           Action: "ssm:ListCommands"
       #           Resource: "*"
 
   CFSignalerFunction:
+    DependsOn: SchedulerSSMParameter
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: CFSignalerFunction
@@ -295,6 +318,42 @@ Resources:
       Timeout: 240
       # Layers:
       #   - !Ref Layer
+
+  EventBridgeRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Name: "CFSignalerRule"
+      ScheduleExpression: !Sub "rate(${WaitInMinutes} minutes)"
+      State: "ENABLED" # initially enabled
+      Targets:
+        - Arn: !GetAtt CFSignalerFunction.Arn
+          Id: "CFSignalerFunction"
+          Input: !
+            !Sub |
+            {
+              "RequestId":"__Event__",
+              "ResourceProperties": {
+                "StackName": "${AWS::StackName}",
+                "Event":"CFSignalerRule",
+
+              }
+            }
+
+  LambdaInvokePermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !GetAtt CFSignalerFunction.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt EventBridgeRule.Arn
+
+  SchedulerSSMParameter:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      Name: !Sub "${AWS::StackId}/CFSignalerFunction/SchedulerFlag"
+      Type: "String"
+      Value: !Sub "RuleState_increment_0"
+      Description: "This parameter is used to store a the scheduler state"
 
 Outputs:
   InstanceId:
