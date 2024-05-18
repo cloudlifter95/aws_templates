@@ -1,5 +1,5 @@
 The issue with the initial design is its strict transaction nature: a failure during recreation results in total VM loss. Recreation is often necessary when an instance's physical properties change. In a mutable environment, VMs are typically re-created from images generated on the fly. In production, it’s preferable for a server to operate with reduced functionality rather than no service. Therefore, we propose an architecture where the VM is retained even if all configurations are not successfully applied during recreation. Instead of rolling back the VM, an alarm is triggered and an incident is logged. As such, this solution can be used for the following:
-- Avoid interactions between the EC2 instance and AWS during mid-life proxy configuration (e.g., for security reasons).
+- Avoid interactions between the EC2 instance and AWS during mid-life proxy configuration (e.g., for security reasons vm is hardened and denied interactions with AWS).
 - Maintain a strict transactional aspect of CreationPolicy for creation and less strict for updates.
 - Ensure update validation remains necessary but non-blocking, shifting the transaction responsibility elsewhere.
 

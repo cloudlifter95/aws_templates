@@ -30,38 +30,38 @@ EC2_CLIENT = boto3.client('ec2', config=config)
 EVENT_CLIENT = boto3.client('events', config=config)
 
 COUNTER_PARAMETER_INIT_VALUE = "enabled_increment_0"
-
+LOGICAL_RESOURCE_ID = os.environ['LogicalResourceId']
+SCHEDULER_NAME=os.environ['SCHEDULER_NAME']
+THRESHOLD = int(os.environ['Threshold'])
 
 def cfn_signal_resource(event, status="SUCCESS"):
     response = CFN_CLIENT.signal_resource(
         StackName=event['StackId'],
         LogicalResourceId=event['LogicalResourceId'],
         UniqueId=event['InstanceId'],  # resource id
-        Status="SUCCESS"  # | "FAILURE"
+        Status=status  # "SUCCESS" | "FAILURE"
     )
     return response
 
 
-def describe_cf_ec2_instance(cfn_client, event, logical_resource_id, context):
+def describe_cf_ec2_instance(event, logical_resource_id, context=None):
     # Get the stack resource status
     response = CFN_CLIENT.describe_stack_resource(
-        stack_name=event['ResourceProperties']['StackName']
-        StackName=stack_name,
+        StackName=event['ResourceProperties']['StackName'],
         LogicalResourceId=logical_resource_id
     )
     return response
 
 
-def check_resource_status(cfn_client, event, logical_resource_id, cf_ec2_dict context):
+def check_resource_status(event, cf_ec2_dict, context=None):
     stack_name = event['ResourceProperties']['StackName']
-    logical_resource_id = logical_resource_id
     resource_status = None  # todo if stays none, should be handled with incident
 
     try:
-        response = describe_cf_ec2_instance(cf_ec2_dict)
+        # response = describe_cf_ec2_instance(cf_ec2_dict)
 
-        resource_status = response['StackResourceDetail']['ResourceStatus']
-        print(f"Resource status for {logical_resource_id} in stack {
+        resource_status = cf_ec2_dict['StackResourceDetail']['ResourceStatus']
+        print(f"Resource status in stack {
               stack_name}: {resource_status}")
 
         # responseData = {'ResourceStatus': resource_status}
@@ -116,8 +116,7 @@ def is_success(value):
     else:
         return False
 
-
-def is_increment_below_threshold(value="enabled_increment_0", threshold):
+def is_increment_below_threshold(value, threshold):
     if value.split('_')[2] < threshold:
         return True
     else:
@@ -128,8 +127,9 @@ def is_increment_below_threshold(value="enabled_increment_0", threshold):
 
 def run_checks(event, cf_ec2_dict):
     success = False
-    instance_id = cf_ec2_dict['StackResourceDetail']['StackResourceDetail']
-    success = check_ec2_instance(instance_id)
+    instance_id = cf_ec2_dict['StackResourceDetail']['PhysicalResourceId']
+    if (check_ec2_instance(instance_id) == 'Running and Initialized'):
+        success = True
 
     return success
 
@@ -238,6 +238,18 @@ def disable_aws_scheduler(event):
         print(f"An error occurred: {str(e)}")
         raise Exception('EventRuleError')
 
+def enable_aws_scheduler(scheduler_name):
+    rule_name = scheduler_name
+    try:
+        EVENT_CLIENT.enable_rule(Name=rule_name)
+        print(f"Scheduler '{rule_name}' enabled successfully.")
+    except EVENT_CLIENT.exceptions.ResourceNotFoundException:
+        print(f"Scheduler '{rule_name}' not found.")
+        raise Exception('NoEventRuleFound')
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        raise Exception('EventRuleError')
+
 def generate_incident():
     return handle_incident({"incident": "title", "message": "message"})
 
@@ -248,7 +260,6 @@ def handle_incident(incident_dict):
 
 
 def lambda_handler(event, context):
-    status = [200, 'SUCCEEDED']
     logger.info('## EVENT')
     logger.info(json.dumps(event))
     logger.info('## ENVIRONMENT VARIABLES')
@@ -258,28 +269,64 @@ def lambda_handler(event, context):
     logger.info('## CALLER')
     logger.info(json.dumps(boto3.client('sts').get_caller_identity()))
 
-    CurrentAccountId = context.invoked_function_arn.split(":")[4]
+    try:
+        current_account_id = context.invoked_function_arn.split(":")[4]
+        status = [200, 'SUCCEEDED']
+        responseData = {"status": ', '.join(status)}
+        check_resource_status(event=event, cf_ec2_dict=cf_ec2_dict)
+        cf_ec2_dict = describe_cf_ec2_instance(event=event, logical_resource_id=LOGICAL_RESOURCE_ID, context=context)
 
-    # from custom
-    if 'RequestType' in event and 'StackId' in event and 'RequestId' in event and event['RequestId'] != '__Event__':
-        print("Lambda is being invoked from a CloudFormation custom resource.")
-        # Perform custom resource logic here
-        try:
-            pass
-        except:
-            status = [400, 'FAILED']
-            responseData = {"status": ', '.join(status)}
-        cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
-    else:
-        print("Lambda is not being invoked from a CloudFormation custom resource. ")
-        # from scheduler
-        if event['RequestId'] == '__Event__':
-            print("Lambda called from event")
-        # from else
+        # from custom
+        if 'RequestType' in event and 'StackId' in event and 'RequestId' in event and event['RequestId'] != '__Event__':
+            print("Lambda is being invoked from a CloudFormation custom resource.")
+            if event['RequestType'] == 'Delete' or event['RequestType'] == 'Create': # nothing to perform
+                print(f"Signal is {event['RequestType']}. Pass")
+            else:
+                # Perform custom resource logic here
+                try:
+                    initialize_counter(event)
+                    enable_aws_scheduler(SCHEDULER_NAME)
+                except:
+                    status = [400, 'FAILED']
+                    responseData = {"status": ', '.join(status)}
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
         else:
-            print("Lambda called manually. Pass")
-            status[1] = 'PASSED'
-
+            print("Lambda is not being invoked from a CloudFormation custom resource. ")
+            # from scheduler
+            if event['RequestId'] == '__Event__':
+                print("Lambda called from event")
+                counter_value = load_counter_value(event)
+                if 'disabled' in counter_value:
+                    raise Exception('RuleDisabled')
+                if(is_success(counter_value)):
+                    initialize_counter(event) # reset
+                    disable_aws_scheduler(event)
+                    cfn_signal_resource(event, "SUCCESS")
+                    status = [200, 'SUCCEEDED']
+                else:
+                    if(not is_increment_below_threshold(counter_value, THRESHOLD)):
+                        generate_incident()
+                        initialize_counter(event) # reset
+                        disable_aws_scheduler(event)
+                        status = [200, 'INCIDENT_RAISED']
+                    else:
+                        if(run_checks(event, cf_ec2_dict)):
+                            add_success_suffix(event, counter_value)
+                            status = [200, f"Success_suffix_appended_{counter_value}"]
+                        increment_counter(event, counter_value)
+                        status = [200, f"Counter_incrementer_{counter_value}"]
+            # from else
+            else:
+                print("Lambda called manually. Pass")
+                status = [200, 'PASSED']
+    except Exception as e:
+        logger.error(e)
+        status = [400, 'FAILED']
+        if 'RequestType' in event and 'StackId' in event and 'RequestId' in event and event['RequestId'] != '__Event__':
+            responseData = {"status": ', '.join(status)}
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+        else:
+            pass
     return {
         'statusCode': status[0],
         'body': status[1]
