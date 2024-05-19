@@ -31,8 +31,9 @@ EVENT_CLIENT = boto3.client('events', config=config)
 
 COUNTER_PARAMETER_INIT_VALUE = "enabled_increment_0"
 LOGICAL_RESOURCE_ID = os.environ['LogicalResourceId']
-SCHEDULER_NAME=os.environ['SCHEDULER_NAME']
+SCHEDULER_NAME = os.environ['SCHEDULER_NAME']
 THRESHOLD = int(os.environ['Threshold'])
+
 
 def cfn_signal_resource(event, status="SUCCESS"):
     response = CFN_CLIENT.signal_resource(
@@ -61,8 +62,7 @@ def check_resource_status(event, cf_ec2_dict, context=None):
         # response = describe_cf_ec2_instance(cf_ec2_dict)
 
         resource_status = cf_ec2_dict['StackResourceDetail']['ResourceStatus']
-        print(f"Resource status in stack {
-              stack_name}: {resource_status}")
+        print(f"Resource status in stack {stack_name}: {resource_status}")
 
         # responseData = {'ResourceStatus': resource_status}
         # cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
@@ -116,6 +116,7 @@ def is_success(value):
     else:
         return False
 
+
 def is_increment_below_threshold(value, threshold):
     if value.split('_')[2] < threshold:
         return True
@@ -154,6 +155,7 @@ def add_success_suffix(event, previous_value):
     except Exception as e:
         print(f"Failed to set parameter value: {e}")
         raise Exception('ParamSuccessSetFailed')
+
 
 def increment_counter(event, value):
     numbers = re.findall(r'\d+', value)
@@ -224,6 +226,7 @@ def check_ec2_instance(instance_id):
         responseData = {'Error': str(e)}
         raise Exception('EC2StatusCheckFailed')
 
+
 def disable_aws_scheduler(event):
     rule_name = event['ResourceProperties'].get('Event', None)
     if rule_name is None:
@@ -238,6 +241,7 @@ def disable_aws_scheduler(event):
         print(f"An error occurred: {str(e)}")
         raise Exception('EventRuleError')
 
+
 def enable_aws_scheduler(scheduler_name):
     rule_name = scheduler_name
     try:
@@ -249,6 +253,7 @@ def enable_aws_scheduler(scheduler_name):
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         raise Exception('EventRuleError')
+
 
 def generate_incident():
     return handle_incident({"incident": "title", "message": "message"})
@@ -274,12 +279,13 @@ def lambda_handler(event, context):
         status = [200, 'SUCCEEDED']
         responseData = {"status": ', '.join(status)}
         check_resource_status(event=event, cf_ec2_dict=cf_ec2_dict)
-        cf_ec2_dict = describe_cf_ec2_instance(event=event, logical_resource_id=LOGICAL_RESOURCE_ID, context=context)
+        cf_ec2_dict = describe_cf_ec2_instance(
+            event=event, logical_resource_id=LOGICAL_RESOURCE_ID, context=context)
 
         # from custom
         if 'RequestType' in event and 'StackId' in event and 'RequestId' in event and event['RequestId'] != '__Event__':
             print("Lambda is being invoked from a CloudFormation custom resource.")
-            if event['RequestType'] == 'Delete' or event['RequestType'] == 'Create': # nothing to perform
+            if event['RequestType'] == 'Delete' or event['RequestType'] == 'Create':  # nothing to perform
                 print(f"Signal is {event['RequestType']}. Pass")
             else:
                 # Perform custom resource logic here
@@ -298,21 +304,22 @@ def lambda_handler(event, context):
                 counter_value = load_counter_value(event)
                 if 'disabled' in counter_value:
                     raise Exception('RuleDisabled')
-                if(is_success(counter_value)):
-                    initialize_counter(event) # reset
+                if (is_success(counter_value)):
+                    initialize_counter(event)  # reset
                     disable_aws_scheduler(event)
                     cfn_signal_resource(event, "SUCCESS")
                     status = [200, 'SUCCEEDED']
                 else:
-                    if(not is_increment_below_threshold(counter_value, THRESHOLD)):
+                    if (not is_increment_below_threshold(counter_value, THRESHOLD)):
                         generate_incident()
-                        initialize_counter(event) # reset
+                        initialize_counter(event)  # reset
                         disable_aws_scheduler(event)
                         status = [200, 'INCIDENT_RAISED']
                     else:
-                        if(run_checks(event, cf_ec2_dict)):
+                        if (run_checks(event, cf_ec2_dict)):
                             add_success_suffix(event, counter_value)
-                            status = [200, f"Success_suffix_appended_{counter_value}"]
+                            status = [
+                                200, f"Success_suffix_appended_{counter_value}"]
                         increment_counter(event, counter_value)
                         status = [200, f"Counter_incrementer_{counter_value}"]
             # from else

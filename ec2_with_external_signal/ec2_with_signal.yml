@@ -129,7 +129,7 @@ Resources:
       Roles:
         - !Ref EC2SSMRole
   EC2Instance:
-    DependsOn: CFSignalerCustom
+    DependsOn: CFSignalerCustomResource
     # CreationPolicy:
     #   ResourceSignal:
     #     Timeout: PT240M
@@ -287,10 +287,10 @@ Resources:
       #   ToPort: "22"
       #   CidrIp: !Ref SSHLocation
 
-  CFSingalerCustomResource:
+  CFSignalerCustomResource:
     Type: 'Custom::MyCustomResource'
     Properties:
-      ServiceToken: !GetAtt CFSignalerFunctionRole.Arn
+      ServiceToken: !GetAtt CFSignalerFunction.Arn
       SchedulerSSMParameter: !Ref SchedulerSSMParameter
 
   CFSignalerFunctionRole:
@@ -324,7 +324,7 @@ Resources:
     DependsOn: SchedulerSSMParameter
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: CFSignalerFunction
+      FunctionName: !Sub "CFSignalerFunction-${AWS::StackName}"
       Role: !GetAtt CFSignalerFunctionRole.Arn
       CodeUri: ./functions/CFSignalerFunction
       Handler: app.lambda_handler
@@ -333,7 +333,7 @@ Resources:
       Environment:
         Variables:
           LogicalResourceId: "EC2Instance" # is the CF logical name of ec2instance
-          SchedulerName: "CFSignalerRule"
+          SchedulerName: !Sub "CFSignalerRule-${AWS::StackName}"
           Threshold: !Ref Threshold
           
       # Layers:
@@ -342,20 +342,19 @@ Resources:
   EventBridgeRule:
     Type: "AWS::Events::Rule"
     Properties:
-      Name: "CFSignalerRule"
+      Name: !Sub "CFSignalerRule-${AWS::StackName}"
       ScheduleExpression: !Sub "rate(${WaitInMinutes} minutes)"
       State: "ENABLED" # initially enabled
       Targets:
         - Arn: !GetAtt CFSignalerFunction.Arn
           Id: "CFSignalerFunction"
-          Input: !
-            !Sub |
+          Input: !Sub |
             {
               "RequestId":"__Event__",
               "ResourceProperties": {
                 "StackName": "${AWS::StackName}",
-                "Event":"CFSignalerRule",
-                "SchedulerSSMParameter": ${SchedulerSSMParameter}
+                "Event":"CFSignalerRule-${AWS::StackName}",
+                "SchedulerSSMParameter": "${SchedulerSSMParameter}"
               }
             }
 
@@ -370,7 +369,7 @@ Resources:
   SchedulerSSMParameter:
     Type: "AWS::SSM::Parameter"
     Properties:
-      Name: !Sub "${AWS::StackId}/CFSignalerFunction/SchedulerFlag"
+      Name: !Sub "/${AWS::StackName}/CFSignalerFunction/SchedulerFlag"
       Type: "String"
       Value: !Sub "${RuleState}_increment_0"
       Description: "This parameter is used to store a the scheduler state"
