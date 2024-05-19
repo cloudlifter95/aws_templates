@@ -31,7 +31,7 @@ EVENT_CLIENT = boto3.client('events', config=config)
 
 COUNTER_PARAMETER_INIT_VALUE = "enabled_increment_0"
 LOGICAL_RESOURCE_ID = os.environ['LogicalResourceId']
-SCHEDULER_NAME = os.environ['SCHEDULER_NAME']
+SCHEDULER_NAME = os.environ['SchedulerName']
 THRESHOLD = int(os.environ['Threshold'])
 
 
@@ -273,9 +273,9 @@ def lambda_handler(event, context):
 
     try:
         current_account_id = context.invoked_function_arn.split(":")[4]
-        status = [200, 'SUCCEEDED']
+        status = ["200", 'SUCCEEDED']
         responseData = {"status": ', '.join(status)}
-        check_resource_status(event=event, cf_ec2_dict=cf_ec2_dict)
+        # check_resource_status(event=event, cf_ec2_dict=cf_ec2_dict)
         cf_ec2_dict = describe_cf_ec2_instance(
             event=event, logical_resource_id=LOGICAL_RESOURCE_ID, context=context)
 
@@ -290,7 +290,7 @@ def lambda_handler(event, context):
                     initialize_counter(event)
                     enable_aws_scheduler(SCHEDULER_NAME)
                 except:
-                    status = [400, 'FAILED']
+                    status = ["400", 'FAILED']
                     responseData = {"status": ', '.join(status)}
             cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
         else:
@@ -305,26 +305,26 @@ def lambda_handler(event, context):
                     initialize_counter(event)  # reset
                     disable_aws_scheduler(event)
                     cfn_signal_resource(event, "SUCCESS")
-                    status = [200, 'SUCCEEDED']
+                    status = ["200", 'SUCCEEDED']
                 else:
                     if (not is_increment_below_threshold(counter_value, THRESHOLD)):
                         generate_incident()
                         initialize_counter(event)  # reset
                         disable_aws_scheduler(event)
-                        status = [200, 'INCIDENT_RAISED']
+                        status = ["200", 'INCIDENT_RAISED']
                     else:
                         if (run_checks(event, cf_ec2_dict)):
                             add_success_suffix(event, counter_value)
-                            status = [200, f"Success_suffix_appended_{counter_value}"]
+                            status = ["200", f"Success_suffix_appended_{counter_value}"]
                         increment_counter(event, counter_value)
-                        status = [200, f"Counter_incrementer_{counter_value}"]
+                        status = ["200", f"Counter_incrementer_{counter_value}"]
             # from else
             else:
                 print("Lambda called manually. Pass")
-                status = [200, 'PASSED']
+                status = ["200", 'PASSED']
     except Exception as e:
         logger.error(e)
-        status = [400, 'FAILED']
+        status = ["400", 'FAILED']
         if 'RequestType' in event and 'StackId' in event and 'RequestId' in event and event['RequestId'] != '__Event__':
             responseData = {"status": ', '.join(status)}
             cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
