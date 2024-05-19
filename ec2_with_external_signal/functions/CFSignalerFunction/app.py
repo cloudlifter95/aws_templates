@@ -90,8 +90,7 @@ def initialize_counter(event):
             Overwrite=True
         )
 
-        print(f"Parameter {counter_parameter_name} set to {
-              COUNTER_PARAMETER_INIT_VALUE}")
+        print(f"Parameter {counter_parameter_name} set to {COUNTER_PARAMETER_INIT_VALUE}")
     except Exception as e:
         print(f"Failed to set parameter value: {e}")
         raise Exception('ParamInitFailed')
