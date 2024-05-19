@@ -149,8 +149,7 @@ def add_success_suffix(event, previous_value):
             Overwrite=True
         )
 
-        print(f"Parameter {counter_parameter_name} set to {
-              previous_value}_success")
+        print(f"Parameter {counter_parameter_name} set to {previous_value}_success")
     except Exception as e:
         print(f"Failed to set parameter value: {e}")
         raise Exception('ParamSuccessSetFailed')
@@ -179,8 +178,7 @@ def increment_counter(event, value):
             Overwrite=True
         )
 
-        print(f"Parameter {counter_parameter_name} set to {
-              incremented_value}")
+        print(f"Parameter {counter_parameter_name} set to {incremented_value}")
     except Exception as e:
         print(f"Failed to set parameter value: {e}")
         raise Exception('ParamIncrementFailed')
@@ -317,8 +315,7 @@ def lambda_handler(event, context):
                     else:
                         if (run_checks(event, cf_ec2_dict)):
                             add_success_suffix(event, counter_value)
-                            status = [
-                                200, f"Success_suffix_appended_{counter_value}"]
+                            status = [200, f"Success_suffix_appended_{counter_value}"]
                         increment_counter(event, counter_value)
                         status = [200, f"Counter_incrementer_{counter_value}"]
             # from else
