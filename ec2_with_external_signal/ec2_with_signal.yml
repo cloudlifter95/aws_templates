@@ -122,6 +122,7 @@ Resources:
       ManagedPolicyArns:
         - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
         - "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+        - "arn:aws:iam::aws:policy/AWSCloudFormationReadOnlyAccess"
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
@@ -140,9 +141,10 @@ Resources:
     Metadata:
       AWS::CloudFormation::Init:
         configSets:
-          init_setup: [install_cfn, echo_command, signal_success]
+          init_setup: [update_cfn, echo_command, signal_success]
+          update: [update_cfn]
 
-        install_cfn:
+        update_cfn:
           files:
             /etc/cfn/cfn-hup.conf:
               content: !Sub |
@@ -235,7 +237,7 @@ Resources:
           yum update -y aws-cfn-bootstrap
 
           # Check if stack is in CREATE_IN_PROGRESS state
-          stack_status=$(aws cloudformation describe-stacks --stack-name ${AWS::StackName} --query "Stacks[0].StackStatus" --output text 2>&1)
+          stack_status=$(aws cloudformation describe-stacks --stack-name ${AWS::StackName} --query "Stacks[0].StackStatus" --region ${AWS::Region} --output text 2>&1)
           if [[ $? -ne 0 ]]; then
             echo "Failed to describe stack. Error: $stack_status"
             stack_status="DENIED"
@@ -243,10 +245,11 @@ Resources:
 
           if [[ "$stack_status" == "CREATE_IN_PROGRESS" ]]; then
             echo "Stack is in CREATE_IN_PROGRESS state. Sending cfn-init signal."
-            /opt/aws/bin/cfn-init -s true --stack ${AWS::StackId} --resource EC2Instance --region ${AWS::Region}
+            /opt/aws/bin/cfn-init -s true --stack ${AWS::StackId} --resource EC2Instance --configsets init_setup --region ${AWS::Region}
           elif [[ "$stack_status" == "DENIED" || "$stack_status" == *"IN_PROGRESS" ]]; then
             echo "Stack status is DENIED or UPDATE_IN_PROGRESS. Exiting with success (letting signal be handled externally)"
             exit 0
+          fi
 
           # Start cfn-init
           echo "userdata script: start cfn-init. log files: /var/log/cloud-init.log , /var/log/cloud-init-output.log, /var/log/cfn-init-cmd.log , /var/log/cfn-init.log "
