@@ -105,6 +105,11 @@ Parameters:
     MaxValue: 15
     Default: 10
 
+  VoidParamForUpdate:
+    Type: Number
+    Description: "An integer parameter to simulate an update"
+    Default: 0
+
 Mappings: {}
 
 Resources:
@@ -381,3 +386,6 @@ Outputs:
   InstanceId:
     Description: Instance Id of newly created instance
     Value: !Ref EC2Instance
+  VoidParamForUpdateOutput:
+    Description: Void parameter value
+    Value: !Ref VoidParamForUpdate
