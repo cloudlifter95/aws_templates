@@ -37,12 +37,13 @@ THRESHOLD = int(os.environ['Threshold'])
 
 def cfn_signal_resource(event, status="SUCCESS"):
     response = CFN_CLIENT.signal_resource(
-        StackName=event['StackId'],
-        LogicalResourceId=event['LogicalResourceId'],
-        UniqueId=event['InstanceId'],  # resource id
+        StackName=event['ResourceProperties']['StackName'],
+        LogicalResourceId=LOGICAL_RESOURCE_ID,
+        UniqueId=event['ResourceProperties']['InstanceId'],  # resource physical id
         Status=status  # "SUCCESS" | "FAILURE"
     )
     return response
+
 
 
 def describe_cf_ec2_instance(event, logical_resource_id, context=None):
