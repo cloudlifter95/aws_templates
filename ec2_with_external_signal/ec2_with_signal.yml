@@ -144,10 +144,9 @@ Resources:
       Roles:
         - !Ref EC2SSMRole
   EC2Instance:
-    DependsOn: CFSignalerCustomResource
-    # CreationPolicy:
-    #   ResourceSignal:
-    #     Timeout: PT240M
+    DependsOn: 
+      - CFSignalerCustomResource
+      - CFSignalerFunction
     Type: AWS::EC2::Instance
     CreationPolicy:
       ResourceSignal:
@@ -350,7 +349,7 @@ Resources:
       Timeout: 240
       Environment:
         Variables:
-          LogicalResourceId: "EC2Instance" # is the CF logical name of ec2instance
+          LogicalResourceId: "EC2Instance" #! Important: Should be the CF logical name of ec2instance
           SchedulerName: !Sub "CFSignalerRule-${AWS::StackName}"
           Threshold: !Ref Threshold
           
@@ -362,7 +361,7 @@ Resources:
     Properties:
       Name: !Sub "CFSignalerRule-${AWS::StackName}"
       ScheduleExpression: !Sub "rate(${WaitInMinutes} minutes)"
-      State: "ENABLED" # initially enabled
+      State: "ENABLED" #!Important: Initially enabled for the process to bootstart on existing products without the feature.
       Targets:
         - Arn: !GetAtt CFSignalerFunction.Arn
           Id: "CFSignalerFunction"
