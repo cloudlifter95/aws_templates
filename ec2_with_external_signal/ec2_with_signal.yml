@@ -355,7 +355,7 @@ Resources:
           SchedulerName: !Sub "CFSignalerRule-${AWS::StackName}"
           Threshold: !Ref Threshold
           SchedulerSSMParameter: !Ref SchedulerSSMParameter
-          
+          StackName: !Sub "${AWS::StackName}"
       # Layers:
       #   - !Ref Layer
 
@@ -378,12 +378,12 @@ Resources:
               }
             }
   
-  MasterEventBridgeRule: # RunInstance rule that initializes temporal loop
+  MasterEventBridgeRule: # On RunInstances event rule that initializes temporal loop
     DependsOn:
       - SchedulerSSMParameter
     Type: AWS::Events::Rule
     Properties:
-      Name: RunInstancesRule
+      Name: !Sub "CFSignalerRule-${AWS::StackName}-Master"
       Description: EventBridge rule to trigger on RunInstances events
       State: "ENABLED"
       EventPattern:
@@ -396,6 +396,9 @@ Resources:
             - "ec2.amazonaws.com"
           eventName:
             - "RunInstances"
+      Targets:
+        - Arn: !GetAtt CFSignalerFunction.Arn
+          Id: "CFSignalerFunction"
 
   LambdaInvokePermission:
     Type: "AWS::Lambda::Permission"
