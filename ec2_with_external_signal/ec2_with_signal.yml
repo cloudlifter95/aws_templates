@@ -236,6 +236,8 @@ Resources:
           Value: modev
         - Key: Name
           Value: !Ref InstanceName
+        - Key: transaction.health
+          Value: complete # by default complete; will be changed by CFSignaler upon failure.
       Monitoring: false
       UserData: !Base64
         Fn::Sub: |
