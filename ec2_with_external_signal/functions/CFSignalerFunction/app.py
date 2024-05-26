@@ -84,6 +84,15 @@ def event_from_monitored_ec2_instance(event):
     
     return False
 
+def get_stack_status(stack_name):
+    try:
+        response = CFN_CLIENT.describe_stacks(StackName=stack_name)
+        stack_status = response['Stacks'][0]['StackStatus']
+        return stack_status
+    except CFN_CLIENT.exceptions.ClientError as e:
+        print(f"Error fetching stack status: {e}")
+        return None
+
 def enrich_event_with_ec2_resource_id(event):
     response = EC2_CLIENT.describe_instances(
         Filters=[
@@ -328,6 +337,29 @@ def disable_aws_scheduler(event):
 
     return get_aws_scheduler_state(rule_name)
 
+def get_instance_tag_value(instance_id, tag_key):
+    try:
+        tag_value = next((tag['Value'] for tag in EC2_CLIENT.describe_instances(InstanceIds=[instance_id])['Reservations'][0]['Instances'][0].get('Tags', []) if tag['Key'] == tag_key), "TAG_NOT_SET")
+        return tag_value
+    except Exception as e:
+        print(f"Error fetching tag value: {e}")
+        return None
+
+def tag_ec2_instance(instance_id, tag_value=""):
+    tag_key = 'transaction.health'
+    valid_values = ["complete", "compromised", "no_data"]
+
+    if tag_value not in valid_values:
+        raise ValueError(f"Invalid tag value: {tag_value}. Must be one of {valid_values}")
+
+    EC2_CLIENT.create_tags(
+        Resources=[instance_id],
+        Tags=[{'Key': tag_key, 'Value': tag_value}]
+    )
+    print(f"EC2 Tag {tag_key} set to {tag_value}")
+
+    return get_instance_tag_value(instance_id, tag_key)
+
 
 def enable_aws_scheduler(scheduler_name):
     rule_name = scheduler_name
@@ -390,9 +422,21 @@ def lambda_handler(event, context):
                 # temporal loop initialization
                 print("Lambda is being invoked from master event bridge rule. Verifying if event is coming from monitored ec2 instance.")
                 if event_from_monitored_ec2_instance(event):
-                    print("Init steps starting ... ")
+                    if get_stack_status(STACKNAME) == "UPDATE_IN_PROGRESS":
+                        print('Stack in update in progress')
+                        print("Init steps starting ... ")
+                        try:
+                            initialize_counter(event)
+                            enable_aws_scheduler(SCHEDULER_NAME)
+                        except:
+                            status = ["400", 'FAILED']
+                            responseData = {"status": ', '.join(status)}
+                    else:
+                        print('Stack creation. Pass')
+                        status = ["200", 'PASSED']
                 else:
-                    print('RunInstances event not from monitored ec2 instance')
+                    print('RunInstances event not from monitored ec2 instance. Pass')
+                    status = ["200", 'PASSED']
             else:
                 # from scheduler
                 event = enrich_event_with_ec2_resource_id(event)
@@ -404,10 +448,12 @@ def lambda_handler(event, context):
                     if (is_success(counter_value)):
                         initialize_counter(event)  # reset
                         disable_aws_scheduler(event)
+                        tag_ec2_instance(instance_id=event['ResourceProperties']['ec2_resource_id'], tag_value="complete")
                         cfn_signal_resource(event, "SUCCESS")
                         status = ["200", 'SUCCEEDED']
                     else:
-                        if (not is_increment_below_threshold(counter_value, THRESHOLD)):
+                        if (not is_increment_below_threshold(counter_value, THRESHOLD)): # failure to converge
+                            tag_ec2_instance(instance_id=event['ResourceProperties']['ec2_resource_id'], tag_value="compromised")
                             generate_incident()
                             initialize_counter(event)  # reset
                             disable_aws_scheduler(event)
