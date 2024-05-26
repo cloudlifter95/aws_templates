@@ -7,3 +7,16 @@ The issue with the initial design is its strict transaction nature: a failure du
 - Ensure update validation remains necessary but non-blocking, shifting the transaction responsibility elsewhere.
 
 ![alt text](images/image.png)
+
+TODO:
+- UNIT TEST
+- Update the diagram to incorporate the required sequence for creating resources, ensuring the establishment of a temporal loop for both new and updated stacks.
+
+
+
+
+# Temporal loop concept
+Establishment of temporal loop for both new and updated stacks requires these resources to be created in the following order:
+- 1
+- 2
+- 3 ...
