@@ -89,7 +89,7 @@ def cfn_signal_resource(event, status="SUCCESS"):
     response = CFN_CLIENT.signal_resource(
         StackName=event['ResourceProperties']['StackName'],
         LogicalResourceId=LOGICAL_RESOURCE_ID,
-        UniqueId=event['ResourceProperties']['InstanceId'],  # resource physical id
+        UniqueId=event['ResourceProperties']['ec2_resource_id'],  # resource physical id
         Status=status  # "SUCCESS" | "FAILURE"
     )
     return response
@@ -144,6 +144,7 @@ def initialize_counter(event):
     except Exception as e:
         print(f"Failed to set parameter value: {e}")
         raise Exception('ParamInitFailed')
+    return load_counter_value(event)
 
 
 # @log_function_call
@@ -179,7 +180,7 @@ def is_increment_below_threshold(value, threshold):
 def run_checks(event):
     success = False
     instance_id = event['ResourceProperties']['ec2_resource_id']
-    if (check_ec2_instance(instance_id) == 'Running and Initialized'):
+    if (check_ec2_instance(instance_id).get('Initialized', None)):
         success = True
 
     return success
@@ -204,6 +205,8 @@ def add_success_suffix(event, previous_value):
     except Exception as e:
         print(f"Failed to set parameter value: {e}")
         raise Exception('ParamSuccessSetFailed')
+
+    return load_counter_value(event)
 
 
 def increment_counter(event, value):
@@ -233,6 +236,7 @@ def increment_counter(event, value):
     except Exception as e:
         print(f"Failed to set parameter value: {e}")
         raise Exception('ParamIncrementFailed')
+    return load_counter_value(event)
 
 
 def check_ec2_instance(instance_id):
@@ -275,8 +279,22 @@ def check_ec2_instance(instance_id):
         raise Exception('EC2StatusCheckFailed')
 
 
+def get_aws_scheduler_state(rule_name):
+    try:
+        response = EVENT_CLIENT.describe_rule(Name=rule_name)
+        state = response['State']
+        print(f"State of rule '{rule_name}': {state}")
+        return state
+    except EVENT_CLIENT.exceptions.ResourceNotFoundException:
+        print(f"Rule '{rule_name}' not found.")
+        raise Exception('NoEventRuleFound')
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        raise Exception('EventRuleError')
+
 def disable_aws_scheduler(event):
     rule_name = event['ResourceProperties'].get('Event', None)
+    get_aws_scheduler_state(rule_name)
     if rule_name is None:
         raise Exception('NoRuleNameInEvent')
     try:
@@ -289,9 +307,12 @@ def disable_aws_scheduler(event):
         print(f"An error occurred: {str(e)}")
         raise Exception('EventRuleError')
 
+    return get_aws_scheduler_state(rule_name)
+
 
 def enable_aws_scheduler(scheduler_name):
     rule_name = scheduler_name
+    get_aws_scheduler_state(rule_name)
     try:
         EVENT_CLIENT.enable_rule(Name=rule_name)
         print(f"Scheduler '{rule_name}' enabled successfully.")
@@ -301,6 +322,7 @@ def enable_aws_scheduler(scheduler_name):
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         raise Exception('EventRuleError')
+    return get_aws_scheduler_state(rule_name)
 
 
 def generate_incident():
@@ -366,8 +388,10 @@ def lambda_handler(event, context):
                         if (run_checks(event)):
                             add_success_suffix(event, counter_value)
                             status = ["200", f"Success_suffix_appended_{counter_value}"]
-                        increment_counter(event, counter_value)
-                        status = ["200", f"Counter_incrementer_{counter_value}"]
+                        else:
+                            increment_counter(event, counter_value)
+                        counter_value = load_counter_value(event)
+                        status = ["200", f"Counter_incrementer:{counter_value}"]
             # from else
             else:
                 print("Lambda called manually. Pass")
