@@ -60,7 +60,29 @@ LOGICAL_RESOURCE_ID = os.environ['LogicalResourceId']
 SCHEDULER_NAME = os.environ['SchedulerName']
 THRESHOLD = int(os.environ['Threshold'])
 SCHEDULER_SSM_PARAMETER = os.environ['SchedulerSSMParameter']
+STACKNAME = os.environ['StackName']
 
+def event_from_monitored_ec2_instance(event):
+    expected_tags = {
+        "aws:cloudformation:stack-name": STACKNAME,
+        "aws:cloudformation:logical-id": LOGICAL_RESOURCE_ID
+    }
+    try:
+        tag_specification_set = event["detail"]["requestParameters"]["tagSpecificationSet"]["items"]
+    except KeyError:
+        # If the structure is not as expected, return False
+        return False
+    
+    # Check if any of the tag specifications match the expected tags
+    for tag_spec in tag_specification_set:
+        if tag_spec.get("resourceType") == "instance":
+            tags = {tag["key"]: tag["value"] for tag in tag_spec.get("tags", [])}
+            print("Found tags:", tags)
+            print("Expected tags:", expected_tags)
+            if all(tags.get(key) == value for key, value in expected_tags.items()):
+                return True
+    
+    return False
 
 def enrich_event_with_ec2_resource_id(event):
     response = EC2_CLIENT.describe_instances(
@@ -346,7 +368,6 @@ def lambda_handler(event, context):
         status = ["200", 'SUCCEEDED']
         responseData = {"status": ', '.join(status)}
         # check_resource_status(event=event, cf_ec2_dict=cf_ec2_dict)
-        event = enrich_event_with_ec2_resource_id(event)
         print(event)
         # from custom
         if 'RequestType' in event and 'StackId' in event and 'RequestId' in event and event['RequestId'] != '__Event__':
@@ -364,35 +385,45 @@ def lambda_handler(event, context):
             cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
         else:
             print("Lambda is not being invoked from a CloudFormation custom resource. ")
-            # from scheduler
-            if event['RequestId'] == '__Event__':
-                print("Lambda called from event")
-                counter_value = load_counter_value(event)
-                if 'disabled' in counter_value:
-                    raise Exception('RuleDisabled')
-                if (is_success(counter_value)):
-                    initialize_counter(event)  # reset
-                    disable_aws_scheduler(event)
-                    cfn_signal_resource(event, "SUCCESS")
-                    status = ["200", 'SUCCEEDED']
+            # from master scheduler - initializor
+            if 'detail' in event and "managementEvent" in event['detail']:
+                # temporal loop initialization
+                print("Lambda is being invoked from master event bridge rule. Verifying if event is coming from monitored ec2 instance.")
+                if event_from_monitored_ec2_instance(event):
+                    print("Init steps starting ... ")
                 else:
-                    if (not is_increment_below_threshold(counter_value, THRESHOLD)):
-                        generate_incident()
+                    print('RunInstances event not from monitored ec2 instance')
+            else:
+                # from scheduler
+                event = enrich_event_with_ec2_resource_id(event)
+                if event['RequestId'] == '__Event__':
+                    print("Lambda called from scheduler event bridge rule. temporal loop engaged ...")
+                    counter_value = load_counter_value(event)
+                    if 'disabled' in counter_value:
+                        raise Exception('RuleDisabled')
+                    if (is_success(counter_value)):
                         initialize_counter(event)  # reset
                         disable_aws_scheduler(event)
-                        status = ["200", 'INCIDENT_RAISED']
+                        cfn_signal_resource(event, "SUCCESS")
+                        status = ["200", 'SUCCEEDED']
                     else:
-                        if (run_checks(event)):
-                            add_success_suffix(event, counter_value)
-                            status = ["200", f"Success_suffix_appended_{counter_value}"]
+                        if (not is_increment_below_threshold(counter_value, THRESHOLD)):
+                            generate_incident()
+                            initialize_counter(event)  # reset
+                            disable_aws_scheduler(event)
+                            status = ["200", 'INCIDENT_RAISED']
                         else:
-                            increment_counter(event, counter_value)
-                        counter_value = load_counter_value(event)
-                        status = ["200", f"Counter_incrementer:{counter_value}"]
-            # from else
-            else:
-                print("Lambda called manually. Pass")
-                status = ["200", 'PASSED']
+                            if (run_checks(event)):
+                                add_success_suffix(event, counter_value)
+                                status = ["200", f"Success_suffix_appended_{counter_value}"]
+                            else:
+                                increment_counter(event, counter_value)
+                            counter_value = load_counter_value(event)
+                            status = ["200", f"Counter_incrementer:{counter_value}"]
+                # from else
+                else:
+                    print("Lambda called manually or unhandled signal. Pass")
+                    status = ["200", 'PASSED']
     except Exception as e:
         logger.error(e)
         status = ["400", 'FAILED']
