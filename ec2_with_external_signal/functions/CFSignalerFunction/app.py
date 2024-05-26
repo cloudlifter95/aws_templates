@@ -59,6 +59,7 @@ COUNTER_PARAMETER_INIT_VALUE = "enabled_increment_0"
 LOGICAL_RESOURCE_ID = os.environ['LogicalResourceId']
 SCHEDULER_NAME = os.environ['SchedulerName']
 THRESHOLD = int(os.environ['Threshold'])
+SCHEDULER_SSM_PARAMETER = os.environ['SchedulerSSMParameter']
 
 
 def enrich_event_with_ec2_resource_id(event):
@@ -126,8 +127,7 @@ def check_resource_status(event, cf_ec2_dict, context=None):
 
 
 def initialize_counter(event):
-    counter_parameter_name = event['ResourceProperties'].get(
-        'SchedulerSSMParameter', None)
+    counter_parameter_name = SCHEDULER_SSM_PARAMETER
     if counter_parameter_name is None:
         raise Exception('NoCounter')
 
@@ -149,8 +149,7 @@ def initialize_counter(event):
 
 # @log_function_call
 def load_counter_value(event):
-    counter_parameter_name = event['ResourceProperties'].get(
-        'SchedulerSSMParameter', None)
+    counter_parameter_name = SCHEDULER_SSM_PARAMETER
     if counter_parameter_name is None:
         raise Exception('NoCounter')
     response = SSM_CLIENT.get_parameter(
@@ -187,8 +186,7 @@ def run_checks(event):
 
 
 def add_success_suffix(event, previous_value):
-    counter_parameter_name = event['ResourceProperties'].get(
-        'SchedulerSSMParameter', None)
+    counter_parameter_name = SCHEDULER_SSM_PARAMETER
     if counter_parameter_name is None:
         raise Exception('NoCounter')
 
@@ -218,8 +216,7 @@ def increment_counter(event, value):
     new_number = str(int(last_number) + 1)
     incremented_value = re.sub(r'\d+$', new_number, value)
 
-    counter_parameter_name = event['ResourceProperties'].get(
-        'SchedulerSSMParameter', None)
+    counter_parameter_name = SCHEDULER_SSM_PARAMETER
     if counter_parameter_name is None:
         raise Exception('NoCounter')
 

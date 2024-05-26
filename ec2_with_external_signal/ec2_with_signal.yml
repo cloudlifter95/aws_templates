@@ -145,7 +145,8 @@ Resources:
         - !Ref EC2SSMRole
   EC2Instance:
     DependsOn: 
-      - CFSignalerCustomResource
+      # - CFSignalerCustomResource # Deprecated
+      - MasterEventBridgeRule
       - CFSignalerFunction
     Type: AWS::EC2::Instance
     CreationPolicy:
@@ -304,11 +305,11 @@ Resources:
       #   ToPort: "22"
       #   CidrIp: !Ref SSHLocation
 
-  CFSignalerCustomResource:
-    Type: 'Custom::MyCustomResource'
-    Properties:
-      ServiceToken: !GetAtt CFSignalerFunction.Arn
-      SchedulerSSMParameter: !Ref SchedulerSSMParameter
+  # CFSignalerCustomResource: # Deprecated
+  #   Type: 'Custom::MyCustomResource'
+  #   Properties:
+  #     ServiceToken: !GetAtt CFSignalerFunction.Arn
+  #     SchedulerSSMParameter: !Ref SchedulerSSMParameter
 
   CFSignalerFunctionRole:
     Type: AWS::IAM::Role
@@ -338,7 +339,8 @@ Resources:
       #           Resource: "*"
 
   CFSignalerFunction:
-    DependsOn: SchedulerSSMParameter
+    DependsOn: 
+      - SchedulerSSMParameter
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub "CFSignalerFunction-${AWS::StackName}"
@@ -349,19 +351,21 @@ Resources:
       Timeout: 240
       Environment:
         Variables:
-          LogicalResourceId: "EC2Instance" #! Important: Should be the CF logical name of ec2instance
+          LogicalResourceId: "EC2Instance" #! Important: Should be the CF logical name of ec2instance to check and monitor
           SchedulerName: !Sub "CFSignalerRule-${AWS::StackName}"
           Threshold: !Ref Threshold
+          SchedulerSSMParameter: !Ref SchedulerSSMParameter
           
       # Layers:
       #   - !Ref Layer
 
-  EventBridgeRule:
+  EventBridgeRule: # Scheduled event bridge rule for temporal loop
+    DependsOn: MasterEventBridgeRule
     Type: "AWS::Events::Rule"
     Properties:
       Name: !Sub "CFSignalerRule-${AWS::StackName}"
       ScheduleExpression: !Sub "rate(${WaitInMinutes} minutes)"
-      State: "ENABLED" #!Important: Initially enabled for the process to bootstart on existing products without the feature.
+      State: "DISABLED" # * Now Disabled by default to avoid spamming; will be set up . # Deprecated pattern: Initially enabled for the process to bootstart on existing products without the feature.
       Targets:
         - Arn: !GetAtt CFSignalerFunction.Arn
           Id: "CFSignalerFunction"
@@ -370,10 +374,28 @@ Resources:
               "RequestId":"__Event__",
               "ResourceProperties": {
                 "StackName": "${AWS::StackName}",
-                "Event":"CFSignalerRule-${AWS::StackName}",
-                "SchedulerSSMParameter": "${SchedulerSSMParameter}"
+                "Event":"CFSignalerRule-${AWS::StackName}"
               }
             }
+  
+  MasterEventBridgeRule: # RunInstance rule that initializes temporal loop
+    DependsOn:
+      - SchedulerSSMParameter
+    Type: AWS::Events::Rule
+    Properties:
+      Name: RunInstancesRule
+      Description: EventBridge rule to trigger on RunInstances events
+      State: "ENABLED"
+      EventPattern:
+        source:
+          - "aws.ec2"
+        detail-type:
+          - "AWS API Call via CloudTrail"
+        detail:
+          eventSource:
+            - "ec2.amazonaws.com"
+          eventName:
+            - "RunInstances"
 
   LambdaInvokePermission:
     Type: "AWS::Lambda::Permission"
@@ -382,6 +404,14 @@ Resources:
       Action: "lambda:InvokeFunction"
       Principal: "events.amazonaws.com"
       SourceArn: !GetAtt EventBridgeRule.Arn
+  
+  LambdaInvokePermissionForMaster:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !GetAtt CFSignalerFunction.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt MasterEventBridgeRule.Arn
 
   SchedulerSSMParameter:
     Type: "AWS::SSM::Parameter"
