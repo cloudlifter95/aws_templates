@@ -5,18 +5,44 @@ import datetime
 import boto3
 from botocore.config import Config
 import re
+import sys
+import types
+
 
 import cfnresponse
-import subprocess
+from functools import wraps
 
+###################### LOGGING 1/2 #####################
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 json.JSONEncoder.default = lambda self, obj: (
     obj.isoformat() if isinstance(obj, datetime.date) else None)
 
-# import sys
-# import shutil
 
+def log_function_call(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        logger.info(f"Calling function: {func.__name__} with args: {args} and kwargs: {kwargs}")
+        result = func(*args, **kwargs)
+        logger.info(f"{func.__name__} returned {result}")
+        return result
+    return wrapper
+
+
+def decorate_all_functions(module):
+    for attr_name in dir(module):
+        attr = getattr(module, attr_name)
+        if isinstance(attr, types.FunctionType):
+            setattr(module, attr_name, log_function_call(attr))
+
+# decorate functions unitarily with wrapper: @log_function_call
+# decorate all module functions with wrapper:
+"""
+# must be at the end of the file
+current_module = sys.modules[__name__]
+decorate_all_functions(current_module)
+"""
+#####################################################
 config = Config(
     retries={
         'max_attempts': 10,
@@ -35,6 +61,30 @@ SCHEDULER_NAME = os.environ['SchedulerName']
 THRESHOLD = int(os.environ['Threshold'])
 
 
+def enrich_event_with_ec2_resource_id(event):
+    response = EC2_CLIENT.describe_instances(
+        Filters=[
+            {
+                'Name': 'tag:aws:cloudformation:stack-name',
+                'Values': [event['ResourceProperties']['StackName']]
+            }
+        ]
+    )
+    instances = []
+    for reservation in response['Reservations']:
+        for instance in reservation['Instances']:
+            instances.append(instance)
+    if not instances:
+        print("No instances found with the specified tag.")
+        return event
+
+    newest_instance = max(instances, key=lambda x: x['LaunchTime'])
+
+    event['ResourceProperties']['ec2_resource_id'] = newest_instance['InstanceId']
+
+    return event
+
+
 def cfn_signal_resource(event, status="SUCCESS"):
     response = CFN_CLIENT.signal_resource(
         StackName=event['ResourceProperties']['StackName'],
@@ -45,14 +95,13 @@ def cfn_signal_resource(event, status="SUCCESS"):
     return response
 
 
-
-def describe_cf_ec2_instance(event, logical_resource_id, context=None):
-    # Get the stack resource status
-    response = CFN_CLIENT.describe_stack_resource(
-        StackName=event['ResourceProperties']['StackName'],
-        LogicalResourceId=logical_resource_id
-    )
-    return response
+# def describe_cf_ec2_instance(event, logical_resource_id, context=None):
+#     # Get the stack resource status
+#     response = CFN_CLIENT.describe_stack_resource(
+#         StackName=event['ResourceProperties']['StackName'],
+#         LogicalResourceId=logical_resource_id
+#     )
+#     return response
 
 
 def check_resource_status(event, cf_ec2_dict, context=None):
@@ -97,6 +146,7 @@ def initialize_counter(event):
         raise Exception('ParamInitFailed')
 
 
+# @log_function_call
 def load_counter_value(event):
     counter_parameter_name = event['ResourceProperties'].get(
         'SchedulerSSMParameter', None)
@@ -118,7 +168,7 @@ def is_success(value):
 
 
 def is_increment_below_threshold(value, threshold):
-    if value.split('_')[2] < threshold:
+    if int(value.split('_')[2]) < threshold:
         return True
     else:
         return False
@@ -126,9 +176,9 @@ def is_increment_below_threshold(value, threshold):
 # change check or add additional checks here
 
 
-def run_checks(event, cf_ec2_dict):
+def run_checks(event):
     success = False
-    instance_id = cf_ec2_dict['StackResourceDetail']['PhysicalResourceId']
+    instance_id = event['ResourceProperties']['ec2_resource_id']
     if (check_ec2_instance(instance_id) == 'Running and Initialized'):
         success = True
 
@@ -277,9 +327,8 @@ def lambda_handler(event, context):
         status = ["200", 'SUCCEEDED']
         responseData = {"status": ', '.join(status)}
         # check_resource_status(event=event, cf_ec2_dict=cf_ec2_dict)
-        cf_ec2_dict = describe_cf_ec2_instance(
-            event=event, logical_resource_id=LOGICAL_RESOURCE_ID, context=context)
-
+        event = enrich_event_with_ec2_resource_id(event)
+        print(event)
         # from custom
         if 'RequestType' in event and 'StackId' in event and 'RequestId' in event and event['RequestId'] != '__Event__':
             print("Lambda is being invoked from a CloudFormation custom resource.")
@@ -314,7 +363,7 @@ def lambda_handler(event, context):
                         disable_aws_scheduler(event)
                         status = ["200", 'INCIDENT_RAISED']
                     else:
-                        if (run_checks(event, cf_ec2_dict)):
+                        if (run_checks(event)):
                             add_success_suffix(event, counter_value)
                             status = ["200", f"Success_suffix_appended_{counter_value}"]
                         increment_counter(event, counter_value)
@@ -335,3 +384,9 @@ def lambda_handler(event, context):
         'statusCode': status[0],
         'body': status[1]
     }
+
+########################## LOGGING 2/2 ############################
+# Apply the decorator to all functions in the current module
+current_module = sys.modules[__name__]
+decorate_all_functions(current_module)
+###############################################################
