@@ -7,7 +7,8 @@ from botocore.config import Config
 import re
 import sys
 import types
-
+import time
+from botocore.exceptions import ClientError
 
 import cfnresponse
 from functools import wraps
@@ -49,6 +50,8 @@ config = Config(
         'mode': 'standard'
     }
 )
+
+EC2_INIT_WAIT = 300
 
 CFN_CLIENT = boto3.client('cloudformation', config=config)
 SSM_CLIENT = boto3.client('ssm', config=config)
@@ -210,13 +213,23 @@ def is_increment_below_threshold(value, threshold):
 def run_checks(event):
     success = False
     instance_id = event['ResourceProperties']['ec2_resource_id']
-    if (check_ec2_instance(instance_id).get('Initialized', None)):
+    instance_init=check_ec2_instance(instance_id)
+    if (instance_init.get('Initialized', None)):
         ###* Checks and actions go here. @Dev
         #*  
         if 1==1: # example test
             success = True
         #*
         ###*
+
+    # Teardown
+    print('Checks done! Tearing down..')
+    if instance_init.get('StopInstanceFlag', None):
+        try:
+            print("Shutting down vm which was initially stopped")
+            EC2_CLIENT.stop_instances(InstanceIds=[instance_id])
+        except Exception as e:
+            print('Error shutting down VM. Passing', e)
 
     return success
 
@@ -272,7 +285,52 @@ def increment_counter(event, value):
     return load_counter_value(event)
 
 
+def start_instance(instance_id, max_wait=EC2_INIT_WAIT):
+    """
+    Start a stopped EC2 instance and wait until it's running, up to a maximum wait time.
+
+    :return: Boolean, True if the instance was started and is running and is initialized within the wait time, else False.
+    """
+
+    try:
+        # Start the instance
+        EC2_CLIENT.start_instances(InstanceIds=[instance_id])
+        print(f"Starting instance {instance_id}. Waiting for it to be 'running' and initialized...")
+
+        start_time = time.time()
+        while True:
+            response = EC2_CLIENT.describe_instance_status(InstanceIds=[instance_id])
+            instance_status = response['InstanceStatuses']
+
+            if not instance_status:
+                # Instance status is not available yet
+                print(f"Instance {instance_id} status is not available yet. Waiting...")
+            else:
+                state = instance_status[0]['InstanceState']['Name']
+                system_status = instance_status[0]['SystemStatus']['Status']
+                instance_status_check = instance_status[0]['InstanceStatus']['Status']
+
+                print(f"Current state: {state}, System status: {system_status}, Instance status: {instance_status_check}")
+
+                if state == 'running' and system_status == 'ok' and instance_status_check == 'ok':
+                    print(f"Instance {instance_id} is now running and initialized.")
+                    return True
+
+            # Check elapsed time
+            elapsed_time = time.time() - start_time
+            if elapsed_time >= max_wait:
+                print(f"Instance {instance_id} did not reach 'running' state within {max_wait / 60} minutes.")
+                return False
+
+            print(f"Waiting for instance {instance_id} to be 'running' and 'initialized'...")
+            time.sleep(10)
+                
+    except ClientError as e:
+        print(f"Could not start instance {instance_id}. Error: {e}")
+        return False
+
 def check_ec2_instance(instance_id):
+    stop_instance_flag = False
     try:
         # Describe the instance to get its status
         response = EC2_CLIENT.describe_instance_status(
@@ -289,21 +347,35 @@ def check_ec2_instance(instance_id):
             instance_status_ok = response['InstanceStatuses'][0]['InstanceStatus']['Status']
 
             is_running = instance_status == 'running'
+            is_stopped = instance_status == 'stopped'
             is_initialized = system_status == 'ok' and instance_status_ok == 'ok'
 
             if is_running and is_initialized:
                 status = "Running and Initialized"
                 initialized = True
             else:
-                status = "Not fully initialized"
-                initialized = False
+                if is_stopped:
+                    cmd_state = start_instance(instance_id) # start and wait
+                    if cmd_state:
+                        stop_instance_flag = True
+                        status = "Running and Initialized"
+                        initialized = True
+                    else:
+                        status = "Not fully initialized"
+                        initialized = False
+                        print('waiting for next iteration')
+                else:
+                    status = "Not fully initialized"
+                    initialized = False
+                    print('waiting for next iteration')
 
         print(f"EC2 instance {instance_id} status: {status}")
 
         responseData = {
             'InstanceId': instance_id,
             'Status': status,
-            'Initialized': initialized
+            'Initialized': initialized,
+            'StopInstanceFlag': stop_instance_flag
         }
         return responseData
     except Exception as e:
