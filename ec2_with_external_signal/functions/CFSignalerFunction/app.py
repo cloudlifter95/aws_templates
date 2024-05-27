@@ -211,7 +211,12 @@ def run_checks(event):
     success = False
     instance_id = event['ResourceProperties']['ec2_resource_id']
     if (check_ec2_instance(instance_id).get('Initialized', None)):
-        success = True
+        ###* Checks and actions go here. @Dev
+        #*  
+        if 1==1: # example test
+            success = True
+        #*
+        ###*
 
     return success
 
