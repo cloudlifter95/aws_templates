@@ -20,3 +20,10 @@ Establishment of temporal loop for both new and updated stacks requires these re
 - 1
 - 2
 - 3 ...
+
+
+# Deployment
+[Check scripts/deploy_cf_readme.md](https://github.com/cloudlifter95/aws_templates/tree/main/ec2_with_external_signal/scripts/deploy_cf_readme.md)
+
+# Unit tests
+[Check functions/run_tests_readme](https://github.com/cloudlifter95/aws_templates/tree/main/ec2_with_external_signal/functions/run_tests_readme.md)
