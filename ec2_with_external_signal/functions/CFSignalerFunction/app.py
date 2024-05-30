@@ -10,7 +10,7 @@ import types
 import time
 from botocore.exceptions import ClientError
 
-import cfnresponse
+from . import cfnresponse
 from functools import wraps
 
 ###################### LOGGING 1/2 #####################
@@ -96,15 +96,16 @@ def get_stack_status(stack_name):
         print(f"Error fetching stack status: {e}")
         return None
 
-def enrich_event_with_ec2_resource_id(event):
+def enrich_event_with_ec2_resource_id(event, cf_tag_key='tag:aws:cloudformation:stack-name'):
     response = EC2_CLIENT.describe_instances(
         Filters=[
             {
-                'Name': 'tag:aws:cloudformation:stack-name',
+                'Name': cf_tag_key,
                 'Values': [event['ResourceProperties']['StackName']]
             }
         ]
     )
+    # logging.info(response)
     instances = []
     for reservation in response['Reservations']:
         for instance in reservation['Instances']:

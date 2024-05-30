@@ -1,0 +1,17 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+boto3="*"
+moto = {extras = ["ec2"], version = "*"}
+
+[dev-packages]
+pytest="*"
+pytest-env="*"
+openapi-spec-validator = "*"
+
+[requires]
+python_version = "3.10"
+python_full_version = "3.10.14"
