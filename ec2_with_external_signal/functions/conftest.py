@@ -19,6 +19,58 @@ import logging
 #     os.environ['AWS_SECRET_ACCESS_KEY'] = 'SK_from_fixture'
 #     os.environ['AWS_SESSION_TOKEN'] = 'ST_from_fixture'
 
+# ## Select tests
+# def marker_names(item):
+#     return set(m.name for m in item.iter_markers())
+
+
+# def pytest_collection_modifyitems(config, items):
+#     device_markers = {
+#         "device1": {"feature1", "feature2", "hardware"},
+#         "device2": {"feature1", "hardware"},
+#     }
+
+#     device_option = config.getoption("--device")
+
+#     if device_option is None:
+#         for item in items:
+#             if list(item.iter_markers()):
+#                 item.add_marker(pytest.mark.skip("has no markers"))
+#     else:
+#         allowed_markers = device_markers[device_option]
+#         for item in items:
+#             if marker_names(item) != allowed_markers:
+#                 item.add_marker(pytest.mark.skip(f"has some markers missing for {device_option}"))
+
+
+# Add markers to use
+# hook that allows to configure pytest settings before any tests are collected or executed
+def pytest_configure(config):
+    config.addinivalue_line("markers", "use_setup_cfnsignaler_module: use the setup_environment_and_env_vars_for_cfnsignaler fixture for this test module")
+
+# hook that allows to modify the collection of test items after they have been collected but before they are executed.
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        marker_names = [marker.name for marker in item.iter_markers()]
+        logging.info(f"Markers on test {item.nodeid}: {', '.join(marker_names)}")
+
+# use setup fixtures
+@pytest.fixture(scope="module", autouse=True)
+def use_setup_cfnsignaler_module_fixture(request):
+    logging.info(request.node)
+    if any(marker.name == "use_setup_cfnsignaler_module" for marker in request.node.own_markers):
+        # use setup fixture related to cfnsignaler
+        logging.info(f"Marker for cfnSignaler found.")
+        request.getfixturevalue('setup_environment_and_env_vars_for_cfnsignaler')
+    else:
+        logging.info('000000000000')
+
+@pytest.fixture(scope='session', autouse=True)
+def mock_aws_fixture():
+    with mock_aws():
+        logging.info('AWS APIs MOCKED!')
+        yield
+
 @pytest.fixture(scope='module')
 def create_ssm_parameter():
     with mock_aws():
@@ -51,24 +103,6 @@ def create_eventbridge_rule():
 
 
 @pytest.fixture(scope='module')
-def setup_environment_and_env_vars(create_ssm_parameter, create_eventbridge_rule):
-    
-    os.environ['StackName'] = 'MyStack'
-
-    param_name = f"{os.environ['StackName']}/CFSignalerFunction/SchedulerFlag"
-    create_ssm_parameter(name=param_name, value="enabled_increment_0")
-
-    rule_arn = create_eventbridge_rule(name='test-rule', schedule_expression='cron(0 12 * * ? *)')
-    eventbridge_client = boto3.client('events')
-    response = eventbridge_client.describe_rule(Name='test-rule')
-
-    os.environ['LogicalResourceId'] = 'EC2Instance'
-    os.environ['SchedulerName'] = f"CFSignalerRule-{os.environ['StackName']}"
-    os.environ['Threshold'] = '2'
-    os.environ['SchedulerSSMParameter'] = param_name
-
-
-@pytest.fixture(scope='function')
 def create_two_instances_sequentially():
     with mock_aws():
         ec2 = boto3.resource('ec2')
@@ -98,6 +132,24 @@ def create_two_instances_sequentially():
         )[0]
 
         yield {'ec2': ec2, 'instance1': instance1, 'instance2': instance2}
+
+
+@pytest.fixture(scope='module')
+def setup_environment_and_env_vars_for_cfnsignaler(create_ssm_parameter, create_eventbridge_rule, create_two_instances_sequentially):
+    logging.info(f"--------------------------- setup_environment_and_env_vars_for_cfnsignaler called ---------------------------")
+    os.environ['StackName'] = 'MyStack'
+
+    param_name = f"{os.environ['StackName']}/CFSignalerFunction/SchedulerFlag"
+    create_ssm_parameter(name=param_name, value="enabled_increment_0")
+
+    rule_arn = create_eventbridge_rule(name='test-rule', schedule_expression='cron(0 12 * * ? *)')
+    eventbridge_client = boto3.client('events')
+    # response = eventbridge_client.describe_rule(Name='test-rule')
+
+    os.environ['LogicalResourceId'] = 'EC2Instance'
+    os.environ['SchedulerName'] = f"CFSignalerRule-{os.environ['StackName']}"
+    os.environ['Threshold'] = '2'
+    os.environ['SchedulerSSMParameter'] = param_name
 
 @pytest.fixture(scope='function')
 def event_from_scheduler():

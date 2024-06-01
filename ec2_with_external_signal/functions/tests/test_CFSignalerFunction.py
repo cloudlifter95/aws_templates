@@ -22,10 +22,14 @@ os.environ['StackName'] = 'mock_stack_name'
 from CFSignalerFunction.app import enrich_event_with_ec2_resource_id
 #######################
 
+# apply marker
+pytestmark = pytest.mark.use_setup_cfnsignaler_module
+
+### tests
 
 @patch('CFSignalerFunction.app.EC2_CLIENT.describe_instances')
 @patch('sys.stdout', new_callable=StringIO)
-def test_enrich_event_with_ec2_resource_id(mock_stdout, mock_describe_instances, setup_environment_and_env_vars, event_from_scheduler):
+def test_enrich_event_with_ec2_resource_id(mock_stdout, mock_describe_instances, event_from_scheduler):
     mock_response = {
         'Reservations': [
             {
@@ -53,3 +57,7 @@ def test_enrich_event_with_ec2_resource_id(mock_stdout, mock_describe_instances,
     # Assertions
     assert printed_output == "No instances found with the specified tag."
     assert 'ec2_resource_id' not in result_event
+
+# @mock_aws
+def test_of_setup():
+    logging.info(boto3.client('ec2').describe_instances())
