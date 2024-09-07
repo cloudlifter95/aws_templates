@@ -1,0 +1,22 @@
+{
+    "StartAt": "PrepareOutput",
+    "States": {
+      "PrepareOutput": {
+        "Type": "Pass",
+        "Result": {
+          "Payload": {
+            "items": [
+              {"id": 1, "name": "item1"},
+              {"id": 2, "name": "item2"},
+              {"id": 3, "name": "item3"}
+            ]
+          }
+        },
+        "Next": "SucceedState"
+      },
+      "SucceedState": {
+        "Type": "Succeed"
+      }
+    }
+  }
+  

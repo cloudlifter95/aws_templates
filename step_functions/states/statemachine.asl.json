@@ -1,0 +1,51 @@
+{
+    "StartAt": "Pass",
+    "States": {
+      "Pass": {
+        "Type": "Pass",
+        "Next": "InvokeChildStateMachine",
+        "ResultPath": "$"
+      },
+      "InvokeChildStateMachine": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::states:startExecution.sync",
+        "Parameters": {
+          "StateMachineArn": "${ChildStepFunction}",
+          "Input": {
+            "Payload.$": "$"
+          }
+        },
+        "ResultPath": "$.ChildExecutionResult",
+        "Next": "ParseChildOutput"
+      },
+      "ParseChildOutput": {
+        "Type": "Pass",
+        "Parameters": {
+          "ParsedOutput.$": "States.StringToJson($.ChildExecutionResult.Output)"
+        },
+        "ResultPath": "$.ParsedChildExecutionResult",
+        "Next": "ParallelIterator"
+      },
+      "ParallelIterator": {
+        "Type": "Map",
+        "ItemsPath": "$.ParsedChildExecutionResult.ParsedOutput.Payload.items",
+        "Iterator": {
+          "StartAt": "CallGoogleApi",
+          "States": {
+            "CallGoogleApi": {
+              "Type": "Task",
+              "Resource": "${LambdaFunctionArn}",
+              "End": true,
+              "ResultPath": "$.functionresult"
+            }
+          }
+        },
+        "Next": "SucceedState",
+        "ResultPath": "$.parallelResults"
+      },
+      "SucceedState": {
+        "Type": "Succeed"
+      }
+    }
+  }
+  

@@ -97,15 +97,19 @@ parse_yaml () {
 
 ####### Start #######
 
-UUID=$(uuidgen | awk -F '-' '{print $3$4}')
+# UUID=$(uuidgen | awk -F '-' '{print $3$4}')
 
 get_aws_account_id() {
     local caller_identity
-    caller_identity=$(aws sts get-caller-identity)
+    caller_identity="aws sts get-caller-identity"
+    if [ -n "$profile" ]; then
+        caller_identity+=" --profile $profile"
+    fi
     local account_id
-    account_id=$(echo "$caller_identity" | jq -r .Account)
+    account_id=$($caller_identity | jq -r .Account)
     echo "$account_id"
 }
+
 
 # template_file="$1"
 # stack_name="$2"
@@ -172,6 +176,7 @@ eval "$deploy_command"
 # Check the deployment status
 if [ $? -eq 0 ]; then
     echo "CloudFormation stack '$stack_name' deployed successfully."
+    echo "Append uuid=$uuid to this command to update"
 else
     echo "Failed to deploy CloudFormation stack '$stack_name'."
 fi

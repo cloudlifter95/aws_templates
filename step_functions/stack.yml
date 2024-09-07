@@ -1,0 +1,158 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 
+  - AWS::Serverless-2016-10-31
+Parameters:
+  None:
+    Type: String
+    Description: None
+    Default: None
+
+Resources:
+  SfRole:
+    Type: AWS::IAM::Role
+    Properties:
+      # RoleName: dummy
+      Tags:
+        - Key: tagdummy
+          Value: "true"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - states.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+           - arn:aws:iam::aws:policy/AdministratorAccess # todo: remove in production
+  StepFunction:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Role: !GetAtt SfRole.Arn
+      # Name: ParentSF
+      DefinitionUri: ./states/statemachine.asl.json
+      DefinitionSubstitutions:
+        ChildStepFunction: !GetAtt ChildStepFunction.Arn
+        LambdaFunctionArn: !GetAtt ApiLambda.Arn
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt LogGroup.Arn
+        IncludeExecutionData: false
+        Level: ALL
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      # LogGroupName: MyLG
+      RetentionInDays: 30
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:log-group:/aws/lambda/*
+
+  # Lambda Function to call Google API
+  ApiLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      # FunctionName: MyFCT
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import requests
+          
+          def lambda_handler(event, context):
+              try:
+                  # Make a request to the Google API (replace URL as needed)
+                  response = requests.get('https://www.googleapis.com/books/v1/volumes?q=python')
+                  
+                  # Log the response
+                  print(response.text)
+                  
+                  return {
+                      'statusCode': response.status_code,
+                      'body': response.text
+                  }
+              except Exception as e:
+                  print(f"Error calling Google API: {str(e)}")
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)})
+                  }
+      Runtime: python3.9
+      Timeout: 30
+      MemorySize: 128
+
+######################################################################
+#                 CHILD SF
+######################################################################
+  ChildSfRole:
+    Type: AWS::IAM::Role
+    Properties:
+      # RoleName: dummy
+      Tags:
+        - Key: tagdummy
+          Value: "true"
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - states.amazonaws.com
+        Version: "2012-10-17"
+      ManagedPolicyArns:
+           - arn:aws:iam::aws:policy/AdministratorAccess # todo: remove in production
+  
+  # Child Step Function (definition in a local file)
+  ChildStepFunction:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Role: !GetAtt ChildSfRole.Arn
+      # Name: ChildStepFunction
+      DefinitionUri: ./states/child_statemachine.asl.json
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt ChildLogGroup.Arn
+        IncludeExecutionData: false
+        Level: ALL
+
+  # Log Group for the Child Step Function
+  ChildLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+
+Outputs:
+  ParentStepFunctionARN:
+    Description: The ARN of the Parent Step Function
+    Value: !Ref StepFunction
+  
+  ChildStepFunctionARN:
+    Description: The ARN of the Child Step Function
+    Value: !Ref ChildStepFunction
